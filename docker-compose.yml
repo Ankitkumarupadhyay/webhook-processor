@@ -1,0 +1,114 @@
+services:
+  # ─── Infrastructure ────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: webhook_processor
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Backend API ────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: node dist/main.js
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/webhook_processor
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_PORT: 3001
+      MAX_ATTEMPTS: 5
+      RETRY_DELAY_MS: 1000
+      PROCESSING_STALE_TIMEOUT_SECONDS: 30
+      OUTBOX_POLL_INTERVAL_MS: 1000
+      WORKER_ID: backend
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─── Workers ────────────────────────────────────────────────────
+  worker-1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: node dist/worker-main.js
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/webhook_processor
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MAX_ATTEMPTS: 5
+      RETRY_DELAY_MS: 1000
+      PROCESSING_STALE_TIMEOUT_SECONDS: 30
+      WORKER_ID: worker-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  worker-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: node dist/worker-main.js
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/webhook_processor
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MAX_ATTEMPTS: 5
+      RETRY_DELAY_MS: 1000
+      PROCESSING_STALE_TIMEOUT_SECONDS: 30
+      WORKER_ID: worker-2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  # ─── Frontend ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      # Internal URL used by Next.js server-side rendering / API routes
+      API_URL: http://backend:3001
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
