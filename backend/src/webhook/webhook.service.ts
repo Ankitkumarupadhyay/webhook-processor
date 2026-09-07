@@ -14,9 +14,21 @@ export class WebhookService {
   constructor(
     @Inject(SEQUELIZE_PROVIDER)
     private readonly sequelize: Sequelize,
-  ) {}
+  ) { }
 
   async ingestWebhook(dto: CreateWebhookDto): Promise<{ success: boolean; eventId: string; status: string; isDuplicate?: boolean }> {
+
+    const existing = await WebhookEvent.findOne({ where: { eventId: dto.eventId } });
+    if (existing) {
+      this.logger.warn(`Duplicate webhook received for eventId: ${dto.eventId}`);
+      return {
+        success: true,
+        eventId: dto.eventId,
+        status: existing.status,
+        isDuplicate: true,
+      };
+    }
+
     const maxAttempts = parseInt(process.env.MAX_ATTEMPTS || '5', 10);
 
     try {
@@ -55,13 +67,11 @@ export class WebhookService {
       };
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
-        this.logger.warn(`Duplicate webhook received for eventId: ${dto.eventId}`);
-        // Fetch existing event status for idempotent response
-        const existing = await WebhookEvent.findOne({ where: { eventId: dto.eventId } });
+        this.logger.warn(`Concurrent duplicate webhook received for eventId: ${dto.eventId}`);
         return {
           success: true,
           eventId: dto.eventId,
-          status: existing ? existing.status : WebhookEventStatus.PENDING,
+          status: WebhookEventStatus.PENDING,
           isDuplicate: true,
         };
       }
