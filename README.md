@@ -134,25 +134,31 @@ Webhook (POST /webhooks)
 
 ## 5. Demonstration Scripts
 
-Executable test scripts are available in the `scripts/` directory:
+The `scripts/` folder contains automated bash scripts created specifically to reproduce, test, and demonstrate the 6 core reliability requirements of this assessment against a running system.
+
+Evaluators and developers can execute these scripts with one command to instantly verify that the system handles edge cases like concurrency, crashes, retries, and high-volume bursts correctly.
+
+### Summary of What Each Script Does
+
+| Script File | Target Requirement | What It Does & Demonstrates |
+|---|---|---|
+| `duplicate-test.sh` | 1. Duplicate Protection | Fires 10 simultaneous POST requests with the exact same eventId. Verifies the API returns 200 OK safely and writes exactly 1 row to processed_orders. |
+| `temporary-failure.sh` | 2. Retry Backoff | Submits an event with `simulate: "fail_then_succeed:2"`. Demonstrates Attempt 1 & 2 failing, Attempt 3 succeeding, and logs the full attempt history. |
+| `permanent-failure.sh` | 3. Permanent Failure | Submits `simulate: "always_fail"`. Demonstrates that retries automatically stop once MAX_ATTEMPTS (5) is reached, marking the event FAILED. |
+| `parallel-processing.sh` | 4. Worker Parallelism | Submits 2 slow events (`simulate: "slow:10"`). Checks attempt logs to verify worker-1 and worker-2 process them concurrently. |
+| `crash-recovery.sh` | 5. Crash Recovery | Submits `slow:20`, lets worker-1 claim it, then kills worker-1 (`docker compose stop worker-1`). Shows RecoveryService detecting the crash after 30s, logging a CRASHED attempt, and worker-2 completing the job safely. |
+| `burst-500.sh` | 6. System Load & Burst | Fires 500 webhook events at once. Shows that the API stays fully responsive (ingests in <2s) while workers process all 500 events to completion without duplicate order records. |
+
+### How to Run Them
+
+Once `docker compose up` is running, execute any script directly from your terminal:
 
 ```bash
-# 1. Test concurrent duplicate ingestion & business action protection
 ./scripts/duplicate-test.sh
-
-# 2. Test temporary failure retries (fail_then_succeed:2)
 ./scripts/temporary-failure.sh
-
-# 3. Test permanent failure stopping at MAX_ATTEMPTS
 ./scripts/permanent-failure.sh
-
-# 4. Test parallel processing across worker-1 and worker-2
 ./scripts/parallel-processing.sh
-
-# 5. Test worker crash and stale recovery
 ./scripts/crash-recovery.sh
-
-# 6. Test high concurrency burst (500 events)
 ./scripts/burst-500.sh
 ```
 

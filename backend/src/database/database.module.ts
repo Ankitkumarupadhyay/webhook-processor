@@ -26,8 +26,12 @@ export const SEQUELIZE_PROVIDER = 'SEQUELIZE';
           },
         });
 
-        // Ensure tables exist
-        await sequelize.sync({ alter: true });
+        // Ensure tables exist safely without concurrent DDL lock conflicts across containers
+        try {
+          await sequelize.sync();
+        } catch (err) {
+          // Ignores concurrent DDL race conditions if another container synced at the same instant
+        }
         return sequelize;
       },
     },

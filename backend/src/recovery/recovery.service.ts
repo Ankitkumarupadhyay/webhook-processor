@@ -51,19 +51,34 @@ export class RecoveryService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Found stale event stuck in PROCESSING: ${event.eventId} (started at: ${event.processingStartedAt})`);
 
         await this.sequelize.transaction(async (t) => {
-          // Record CRASHED attempt for observability
-          await ProcessingAttempt.create(
-            {
+          // Update existing attempt record to CRASHED, or create one if missing
+          const existingAttempt = await ProcessingAttempt.findOne({
+            where: {
               eventUuid: event.id,
               attemptNumber: event.attemptCount,
-              workerId: 'recovery-service',
-              startedAt: event.processingStartedAt || new Date(),
-              finishedAt: new Date(),
-              result: AttemptResult.CRASHED,
-              error: `Worker crashed or stalled (> ${timeoutSeconds}s)`,
             },
-            { transaction: t },
-          );
+            transaction: t,
+          });
+
+          if (existingAttempt) {
+            existingAttempt.finishedAt = new Date();
+            existingAttempt.result = AttemptResult.CRASHED;
+            existingAttempt.error = `Worker crashed or stalled (> ${timeoutSeconds}s)`;
+            await existingAttempt.save({ transaction: t });
+          } else {
+            await ProcessingAttempt.create(
+              {
+                eventUuid: event.id,
+                attemptNumber: event.attemptCount,
+                workerId: 'recovery-service',
+                startedAt: event.processingStartedAt || new Date(),
+                finishedAt: new Date(),
+                result: AttemptResult.CRASHED,
+                error: `Worker crashed or stalled (> ${timeoutSeconds}s)`,
+              },
+              { transaction: t },
+            );
+          }
 
           // Transition state back to RETRYING
           event.status = WebhookEventStatus.RETRYING;
